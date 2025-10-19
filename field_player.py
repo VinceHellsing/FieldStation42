@@ -27,10 +27,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s:%(message)s", level=logging.INFO
 )
 
+# Constants
+STUCK_STANDBY_THRESHOLD = 2
+
 try:
     from fs42.overlay.ticker import run_ticker
 except ModuleNotFoundError:
-    logging.getLogger("FieldPlayer").warning("Error importing ticker - using the ticker will cause an error.")
+    logging.getLogger("FieldPlayer").warning(
+        "Error importing ticker - using the ticker will cause an error."
+    )
 
 api_commands_queue: multiprocessing.Queue = None
 
@@ -42,34 +47,54 @@ def input_check():
             q_message = api_commands_queue.get(block=False)
         except Empty:
             pass
-        
+
         if q_message:
             command = q_message.get("command", None)
             if not command:
                 return
-            match command:
-                case "exit":
-                    return PlayerOutcome(PlayerState.EXIT_COMMAND)
-                case "reload_data":
-                    LiquidManager().reload_schedules()
-                case "guide":
-                    c_number = StationManager().guide_config["channel_number"]
-                    change_request = {"command": "direct", "channel": c_number}
-                    return PlayerOutcome(PlayerState.CHANNEL_CHANGE, json.dumps(change_request))
-                case "ticker":
-                    message = q_message.get("message", None)
-                    header = q_message.get("header", None)
-                    style = q_message.get("style", None)
-                    iterations = q_message.get("iterations", None)
-                    run_ticker(message, header, style, iterations)
+            try:
+                match command:
+                    case "exit":
+                        return PlayerOutcome(PlayerState.EXIT_COMMAND)
+                    case "reload_data":
+                        LiquidManager().reload_schedules()
+                    case "guide":
+                        c_number = StationManager().guide_config["channel_number"]
+                        change_request = {"command": "direct", "channel": c_number}
+                        return PlayerOutcome(
+                            PlayerState.CHANNEL_CHANGE, json.dumps(change_request)
+                        )
+                    case "ticker":
+                        message = q_message.get("message", None)
+                        header = q_message.get("header", None)
+                        style = q_message.get("style", None)
+                        iterations = q_message.get("iterations", None)
+                        run_ticker(message, header, style, iterations)
+            except Exception as e:
+                logging.getLogger("FieldPlayer").error(
+                    f"Error executing API command '{command}': {e}", exc_info=True
+                )
 
     channel_socket = StationManager().server_conf["channel_socket"]
-    with open(channel_socket, "r") as r_sock:
-        contents = r_sock.read()
-    if len(contents):
-        with open(channel_socket, "w"):
-            pass
-        return PlayerOutcome(PlayerState.CHANNEL_CHANGE, contents)
+
+    # Optimized atomic read and clear
+    try:
+        with open(channel_socket, "r+") as sock:
+            contents = sock.read()
+            if len(contents):
+                # Clear the file content after reading
+                sock.seek(0)
+                sock.truncate()
+                return PlayerOutcome(PlayerState.CHANNEL_CHANGE, contents)
+    except FileNotFoundError:
+        # Handle case where socket might not exist yet.
+        pass
+    except OSError as e:
+        # Handle potential IO errors or permission issues
+        logging.getLogger("FieldPlayer").warning(
+            f"Error accessing channel socket {channel_socket}: {e}"
+        )
+
     return None
 
 
@@ -158,7 +183,7 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
             # Cache stations to prevent race conditions during reload
             station_cache = manager.stations
             stations_len = len(station_cache)
-            #if we got anything, we'll tune up one channel
+            # if we got anything, we'll tune up one channel
             tune_up = True
             # get the json payload
             if player_state.payload:
@@ -195,7 +220,7 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
                                 channel_index -= 1
                                 # channel_index = channel_index if channel_index >= 0 else len(manager.stations)-1
                                 if channel_index < 0:
-                                    channel_index = stations_len-1
+                                    channel_index = stations_len - 1
                                 if not station_cache[channel_index]["hidden"]:
                                     found = True
 
@@ -213,7 +238,6 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
                     channel_index = channel_index if channel_index < stations_len else 0
                     found = not station_cache[channel_index]["hidden"]
 
-
             channel_conf = station_cache[channel_index]
             player.station_config = channel_conf
 
@@ -224,7 +248,10 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
             stuck_timer += 1
 
             # only put it up once after 2 seconds of being stuck
-            if stuck_timer == 2 and "standby_image" in channel_conf:
+            if (
+                stuck_timer == STUCK_STANDBY_THRESHOLD
+                and "standby_image" in channel_conf
+            ):
                 player.play_file(channel_conf["standby_image"])
             current_title_on_stuck = player.get_current_path()
             update_status_socket(

@@ -2,6 +2,7 @@ import logging
 import sys
 import argparse
 import datetime
+import platform
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
@@ -17,16 +18,23 @@ from fs42.fs42_server.fs42_server import mount_fs42_api
 
 FF_USE_FLUID_FILE_CACHE = True
 
-logging.basicConfig(format="[%(name)s] %(message)s", level=logging.INFO, handlers=[RichHandler()])
+logging.basicConfig(
+    format="[%(name)s] %(message)s", level=logging.INFO, handlers=[RichHandler()]
+)
 
 
 class Station42:
-    def __init__(self, config, rebuild_catalog=False, force=False, skip_chapter_scan=False):
+    def __init__(
+        self, config, rebuild_catalog=False, force=False, skip_chapter_scan=False
+    ):
         # station configuration
         self.config = config
         self._l = logging.getLogger(self.config["network_name"])
         self.catalog: ShowCatalog = ShowCatalog(
-            self.config, rebuild_catalog=rebuild_catalog, force=force, skip_chapter_scan=skip_chapter_scan
+            self.config,
+            rebuild_catalog=rebuild_catalog,
+            force=force,
+            skip_chapter_scan=skip_chapter_scan,
         )
         self.get_text_listing = self.catalog.get_text_listing
         self.check_catalog = self.catalog.check_catalog
@@ -165,7 +173,8 @@ def build_parser():
         help="Set logging verbosity level to very chatty",
     )
     parser.add_argument(
-        "-s", "--server",
+        "-s",
+        "--server",
         action="store_true",
         help="Run the FieldStation42 web API server after other actions.",
     )
@@ -174,7 +183,7 @@ def build_parser():
         "--limit_memory",
         nargs=1,
         type=float,
-        help="Enter a number 0.1 and 1.0 to limit the memory usage of a command."
+        help="Enter a number 0.1 and 1.0 to limit the memory usage of a command.",
     )
 
     return parser
@@ -270,38 +279,55 @@ def main():
         success_messages.append(f"I setup logging to file: {args.logfile}")
 
     if args.limit_memory:
+        if platform.system() != "Linux":
+            _l.warning(
+                "Memory limiting is only supported on Linux. Ignoring --limit_memory."
+            )
+        else:
+            try:
+                import resource
 
-        import resource
+                def get_memory():
+                    with open("/proc/meminfo", "r") as mem:
+                        free_memory = 0
+                        for i in mem:
+                            sline = i.split()
+                            if str(sline[0]) in ("MemFree:", "Buffers:", "Cached:"):
+                                free_memory += int(sline[1])
+                    return free_memory  # KiB
 
-        def get_memory():
-            with open('/proc/meminfo', 'r') as mem:
-                free_memory = 0
-                for i in mem:
-                    sline = i.split()
-                    if str(sline[0]) in ('MemFree:', 'Buffers:', 'Cached:'):
-                        free_memory += int(sline[1])
-            return free_memory  # KiB
+                def memory_limit(percent):
+                    """Limit max memory usage to half."""
+                    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+                    # Convert KiB to bytes, and divide in two to half
+                    resource.setrlimit(
+                        resource.RLIMIT_AS,
+                        (int(get_memory() * 1024 / (1 / percent)), hard),
+                    )
+                    _l.info("Reducing available memory usage.")
 
-
-        def memory_limit(percent):
-            """Limit max memory usage to half."""
-            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-            # Convert KiB to bytes, and divide in two to half
-            resource.setrlimit(resource.RLIMIT_AS, (int(get_memory() * 1024 / (1/percent)), hard))
-            _l.info("Reducing available memory usage.")
-
-
-        memory_percent = args.limit_memory[0]
-        if memory_percent > 1:
-            memory_percent = 1
-            _l.info("Memory percent too high. Using full memory.")
-        elif memory_percent < 0.1:
-            memory_percent = 0.1
-            _l.info("Memory percent too low. Setting to 10%.")
-        memory_limit(memory_percent)
+                memory_percent = args.limit_memory[0]
+                if memory_percent > 1:
+                    memory_percent = 1
+                    _l.info("Memory percent too high. Using full memory.")
+                elif memory_percent < 0.1:
+                    memory_percent = 0.1
+                    _l.info("Memory percent too low. Setting to 10%.")
+                memory_limit(memory_percent)
+            except ImportError:
+                _l.warning(
+                    "The 'resource' module is not available. Cannot limit memory."
+                )
+            except FileNotFoundError:
+                _l.error("Could not find /proc/meminfo. Cannot limit memory.")
+            except Exception as e:
+                _l.error(
+                    f"An unexpected error occurred while trying to limit memory: {e}"
+                )
 
     if args.reset_chapters:
         import sqlite3
+
         _l.info("Clearing all cached chapter markers from database")
         fluid = FluidBuilder()
         with sqlite3.connect(fluid.db_path) as connection:
@@ -315,6 +341,7 @@ def main():
 
     if args.reset_breaks:
         import sqlite3
+
         _l.info("Clearing all cached break points from database")
         fluid = FluidBuilder()
         with sqlite3.connect(fluid.db_path) as connection:
@@ -327,12 +354,11 @@ def main():
         return
 
     if args.schedule:
-        _l.info("Printing shedule summary.")
+        _l.info("Printing schedule summary.")
         print(LiquidManager().get_summary())
         success_messages.append("I printed the schedule summary")
-        print_outcome(success_messages, failure_messages, console)
-        return
-    elif args.printcat is not None:
+
+    if args.printcat is not None:
         conf = StationManager().station_by_name(args.printcat)
         if conf:
             try:
@@ -354,9 +380,8 @@ def main():
             failure_messages.append(
                 f"Can't find station by name to print catalog: {args.printcat}"
             )
-        print_outcome(success_messages, failure_messages, console)
-        return
-    elif args.print_schedule:
+
+    if args.print_schedule:
         try:
             LiquidManager().print_schedule(args.print_schedule, args.verbose)
             success_messages.append(f"I printed the schedule for {args.print_schedule}")
@@ -364,9 +389,8 @@ def main():
             console.print(f"[red]Error printing schedule: {e}[/red]")
             _l.exception(e)
             failure_messages.append("Failed to print schedule - check logs.")
-        print_outcome(success_messages, failure_messages, console)
-        return
-    elif args.check_catalogs is not None:
+
+    if args.check_catalogs is not None:
         _rebuild_list = []
         try:
             _rebuild_list = _get_arg_stations(args.check_catalogs)
@@ -393,9 +417,6 @@ def main():
                     failure_messages.append(
                         f"Failed to check catalog for {station['network_name']} - check logs."
                     )
-        print_outcome(success_messages, failure_messages, console)
-        return
-
 
     if args.delete_schedules is not None:
         _l.info("Starting schedule deletions")
@@ -461,7 +482,6 @@ def main():
                     failure_messages.append(
                         f"Failed to scan for new sequences for {station['network_name']} - check logs."
                     )
-                
 
     if args.rebuild_sequences is not None:
         _rebuild_list = []
@@ -593,13 +613,18 @@ def main():
     if args.server or len(sys.argv) <= 1:
         info = "\nFS42 web server is running on this machine. You can log into the web gui at http://localhost:4242 to manage catalogs and schedules\n"
         print()
-        console.print(Panel.fit(info, title="FieldStation42", subtitle="Its Up To You.", border_style=style.Style(color="blue")))
+        console.print(
+            Panel.fit(
+                info,
+                title="FieldStation42",
+                subtitle="Its Up To You.",
+                border_style=style.Style(color="blue"),
+            )
+        )
         print()
         mount_fs42_api()
-        
-        return
 
-    
+        return
 
 
 if __name__ == "__main__":

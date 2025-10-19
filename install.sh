@@ -1,4 +1,6 @@
-#! /usr/bin/bash
+#!/usr/bin/env bash
+# Exit immediately if a command exits with a non-zero status.
+set -e
 
 echo Installing Fieldstation 42
 
@@ -29,10 +31,10 @@ else
   if [ -d env ]; then
 
     echo Virtual environment created - activating it now
-    # Unix
+    # Windows
     if [ -f env/Scripts/activate ]; then
       source env/Scripts/activate
-    # Windows
+    # Unix/Linux/macOS
     elif [ -f env/bin/activate ]; then
       source env/bin/activate
     else
@@ -49,7 +51,9 @@ fi
 
 
 echo Installing python modules
-pip install -r install/requirements.txt
+# Use the specific python executable and upgrade pip first
+$python -m pip install --upgrade pip
+$python -m pip install -r install/requirements.txt
 
 echo Creating folders
 

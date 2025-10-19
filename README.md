@@ -26,7 +26,7 @@ Cable and broadcast TV simulator intended to provide an authentic experience of 
    - Copy an example config from `confs/examples` to `confs/` and edit as needed.
 5. **Build catalogs and schedules:**
    ```bash
-   python3 station_42.py --rebuild_catalog --schedule
+   python3 station_42.py --rebuild_catalog --add_week
    ```
 6. **Start the player:**
    ```bash
@@ -106,7 +106,7 @@ The quickstart above is only designed to provide an overview of the required ste
 FieldStation42 has multiple components that work together to recreate that old-school TV nostalgia.
 
 ### station_42.py
-Use this to create catalogs and generate schedules. Catalogs are used to store metadata about the stations content, so they need to be rebuilt each time the content changes. Since it is inspecting files on disk, this can take some time depending on the number of videos in your content library. The liquid-scheduler uses the catalogs and the stations configuration to build schedules, so catalogs should be built first. Running `station_42.py` with no arguments will start a UI that runs in the terminal. You can use this to manage catalogs and schedules, or you can perform all operations using command line arguments with no UI. To see the list of all options, run `station_42.py --help`. 
+Use this to create catalogs and generate schedules. Catalogs are used to store metadata about the stations content, so they need to be rebuilt each time the content changes. Since it is inspecting files on disk, this can take some time depending on the number of videos in your content library. The liquid-scheduler uses the catalogs and the stations configuration to build schedules, so catalogs should be built first. Running `station_42.py` with no arguments will start the Web API server. Use the `-g` or `--graphical_interface` argument to start the terminal management UI (TUI). You can also perform all operations using command line arguments with no UI. To see the list of all options, run `station_42.py --help`. 
 
 ### field_player.py
 This is the main TV interface. On startup, it will read the schedule and open the correct video file and skip to the correct position based on the current time. It will re-perform this step each time the channel is changed. If you tune back to a previous channel, it will pick up the current time and start playing as though it had been playing the whole time.

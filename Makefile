@@ -4,9 +4,9 @@ RUN_MODE ?= local
 OS_ENV ?= wsl
 EXTRA_MOUNT ?= /dev/null:/dev/null
 
-CATALOG_LOCATION ?= ../catalog
-RUNTIME_LOCATION ?= ../runtime
-CONFS_LOCATION ?= ../confs
+CATALOG_LOCATION ?= ./catalog
+RUNTIME_LOCATION ?= ./runtime
+CONFS_LOCATION ?= ./confs
 
 # Default Docker Compose file
 COMPOSE_FILE := docker/docker-compose.yml
@@ -42,7 +42,7 @@ docker-build:
 	@echo "  XDG_RUNTIME_DIR=$(XDG_RUNTIME_DIR)"
 	@echo "  PULSE_SOCKET=$(PULSE_SOCKET)"
 	@echo "  EXTRA_MOUNT=$(EXTRA_MOUNT)"
-	
+
 	$(COMPOSE_ENV) docker compose -f $(COMPOSE_FILE) build
 
 docker-up:
@@ -53,9 +53,8 @@ docker-down:
 
 station_42:
 ifeq ($(RUN_MODE),docker)
-	$(COMPOSE_ENV) docker compose -f $(COMPOSE_FILE) up -d
-	docker exec -it fieldstation42 python3 /app/station_42.py $(ARGS)
-	$(COMPOSE_ENV) docker compose -f $(COMPOSE_FILE) down
+	# Use 'run --rm' for one-off commands. Assuming the service name is 'fieldstation42'.
+	$(COMPOSE_ENV) docker compose -f $(COMPOSE_FILE) run --rm fieldstation42 python3 /app/station_42.py $(ARGS)
 else
 	@echo "Running station_42 locally..."
 	python3 station_42.py $(ARGS)
@@ -63,6 +62,7 @@ endif
 
 field_player:
 ifeq ($(RUN_MODE),docker)
+	# The field_player is a persistent service, use 'docker-up' to run it
 	$(COMPOSE_ENV) docker compose -f $(COMPOSE_FILE) up -d
 	docker exec -it fieldstation42 python3 /app/field_player.py $(ARGS)
 	$(COMPOSE_ENV) docker compose -f $(COMPOSE_FILE) down
